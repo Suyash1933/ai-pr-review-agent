@@ -656,7 +656,7 @@ async def aggregate_results(state: PRReviewState) -> dict[str, Any]:
     # -------------------------------------------------------------------------
     # Rule 3: Overall confidence < threshold -> uncertain -> HITL
     # -------------------------------------------------------------------------
-    if overall_confidence <= threshold:
+    if overall_confidence < threshold:
         reason = (
             f"Overall confidence {overall_confidence:.2f} is below "
             f"threshold {threshold:.2f}. Routing to approval queue."
@@ -736,6 +736,40 @@ async def post_review(state: PRReviewState) -> dict[str, Any]:
       -> If GitHub fails: save_review() is never called. No partial state.
       -> If Postgres fails: review is already live on GitHub. We log and continue.
     """
+    # -------------------------------------------------------------------------
+    # ALWAYS post a comment on the PR — the bot is a guide, not an approver.
+    # Whether confidence is above or below threshold, post findings as a comment.
+    # Then additionally route to HITL if human review is needed.
+    # -------------------------------------------------------------------------
+    cfg = get_settings()
+    body = _build_review_summary(state, max_chars=cfg.review_body_max_characters)
+    event = _verdict_to_review_event(state["verdict"])
+    payload = PostReviewPayload(
+        commit_id=state["head_commit_sha"],
+        body=body,
+        event=event,
+        comments=[],
+    )
+
+    github_review_id: int | None = None
+    try:
+        async with GitHubClient(cfg) as client:
+            response = await client.post_pr_review(
+                repo_full_name=state["repo_full_name"],
+                pr_number=state["pr_number"],
+                payload=payload,
+            )
+        github_review_id = response.id
+        logger.info(
+            "post_review | comment_posted | review_id=%d url=%s workflow=%s",
+            response.id, response.html_url, state["workflow_id"],
+        )
+    except Exception as post_err:
+        logger.warning(
+            "post_review | comment_post_failed | error=%s workflow=%s",
+            post_err, state["workflow_id"],
+        )
+
     if state["needs_human_review"]:
         logger.info(
             "post_review | routing_to_hitl | reason=%s workflow=%s",
@@ -743,14 +777,6 @@ async def post_review(state: PRReviewState) -> dict[str, Any]:
             state["workflow_id"],
         )
 
-        # Phase 19: Enqueue to HITL queue (Postgres + Redis).
-        # This replaces the TODO stub. The review is persisted BEFORE this
-        # function returns so the operator has a durable record.
-        #
-        # DEPENDENCY IMPORT NOTE:
-        # We import here (not at module top) to avoid circular imports.
-        # nodes.py -> hitl.queue -> database.models — clean inward dependency.
-        # (Clean-Architecture Dependency-Rule: "source code deps point inward.")
         try:
             from backend.hitl.queue import enqueue_hitl_review
             from backend.memory.redis_client import redis_client as _rc
@@ -772,10 +798,6 @@ async def post_review(state: PRReviewState) -> dict[str, Any]:
                 hitl_id, state["workflow_id"],
             )
         except Exception as hitl_err:
-            # Non-fatal: HITL enqueue failure should not crash the whole pipeline.
-            # The review result is still valid; the operator will need to manually
-            # check the logs and enqueue from Postgres pending rows.
-            # (Stability-Patterns.md: "Failures are inevitable. Contain the damage.")
             logger.error(
                 "post_review | hitl_enqueue_failed | workflow=%s error=%s | "
                 "review result not persisted to HITL queue",
@@ -783,231 +805,13 @@ async def post_review(state: PRReviewState) -> dict[str, Any]:
             )
 
         return {
-            "review_posted": False,
-            "github_review_id": None,
-            "status": ReviewStatus.COMPLETED,
-        }
-
-    logger.info(
-        "post_review | posting_to_github | verdict=%s findings=%d repo=%s pr=%d",
-        state["verdict"].value if state["verdict"] else "none",
-        len(state["final_findings"]),
-        state["repo_full_name"],
-        state["pr_number"],
-    )
-
-    cfg = get_settings()
-
-    # -------------------------------------------------------------------------
-    # Step 1: Build the PostReviewPayload
-    #
-    # Three components:
-    #   a) body     — the top-level review summary (severity counts, confidence)
-    #   b) event    — APPROVE / REQUEST_CHANGES / COMMENT
-    #   c) comments — inline comments on specific lines (findings with file+line)
-    #
-    # WIKI: Stability-Antipatterns.md
-    #   "Optimism bias: assuming edge cases won't occur in production."
-    #   -> GitHub caps review body at 65536 chars. _build_review_summary()
-    #      truncates proactively with a visible notice rather than crashing.
-    # -------------------------------------------------------------------------
-    body = _build_review_summary(state, max_chars=cfg.review_body_max_characters)
-    event = _verdict_to_review_event(state["verdict"])
-
-    # WHY no inline comments here:
-    #   Inline review comments require the `line` number to exist inside the
-    #   diff hunk for that file. The LLM returns line numbers from the full file
-    #   (e.g. line 30 of payment.py) but if that line isn't in the diff GitHub
-    #   returns 422 Unprocessable Entity and the ENTIRE review is rejected —
-    #   including the summary body. Stripping inline comments means the review
-    #   always posts successfully. Proper diff-position mapping (parsing the
-    #   unified diff to find hunk positions) will be added in Phase 17.
-    payload = PostReviewPayload(
-        commit_id=state["head_commit_sha"],
-        body=body,
-        event=event,
-        comments=[],  # inline comments deferred to Phase 17 (diff position mapping)
-    )
-
-    # -------------------------------------------------------------------------
-    # Step 2: POST the review to GitHub
-    #
-    # WIKI: release-it / Stability-Patterns
-    #   "View other enterprise systems with suspicion and distrust."
-    #   -> GitHubClient handles timeout + retry (3 attempts, exp backoff).
-    #   -> We additionally catch the final error here to route to HITL
-    #      rather than letting the exception propagate and mark the workflow FAILED.
-    #      A failed post should be recoverable by a human — not a pipeline crash.
-    #
-    # SPECIAL CASE: GitHubRateLimitError
-    #   We do NOT silently drop rate limit errors. Route to HITL with the
-    #   retry_after_seconds so the human operator knows when to retry.
-    # -------------------------------------------------------------------------
-    github_review_id: int | None = None
-
-    try:
-        async with GitHubClient(cfg) as client:
-            response = await client.post_pr_review(
-                repo_full_name=state["repo_full_name"],
-                pr_number=state["pr_number"],
-                payload=payload,
-            )
-        github_review_id = response.id
-        logger.info(
-            "post_review | github_post_ok | review_id=%d url=%s workflow=%s",
-            response.id,
-            response.html_url,
-            state["workflow_id"],
-        )
-
-    except GitHubRateLimitError as e:
-        logger.error(
-            "post_review | rate_limited | retry_after=%ds workflow=%s "
-            "— routing to HITL",
-            e.retry_after_seconds,
-            state["workflow_id"],
-        )
-        # BUG FIX (demo-day Bug #5): Save to DB even when GitHub post fails.
-        # Review was generated — we must not lose it just because rate limit hit.
-        try:
-            from backend.database.postgres import get_engine
-            from backend.database.repository import save_review
-            from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-            _factory = async_sessionmaker(
-                bind=get_engine(), class_=AsyncSession, expire_on_commit=False
-            )
-            async with _factory() as session:
-                await save_review(
-                    session,
-                    review_id=state["workflow_id"],
-                    repo_full_name=state["repo_full_name"],
-                    pr_number=state["pr_number"],
-                    pr_title=state["pr_title"],
-                    head_commit_sha=state["head_commit_sha"],
-                    pr_diff=state["pr_diff"],
-                    verdict=state["verdict"].value if state["verdict"] else None,
-                    status=ReviewStatus.COMPLETED.value,
-                    overall_confidence=state["overall_confidence"],
-                    needs_human_review=state["needs_human_review"],
-                    human_review_reason=state["human_review_reason"],
-                    findings=state["final_findings"],
-                    github_review_id=None,
-                )
-        except Exception as db_err:
-            logger.error("post_review | rate_limited | postgres_save_failed | %s", db_err)
-        return {
-            "review_posted": False,
-            "github_review_id": None,
-            "status": ReviewStatus.COMPLETED,
-        }
-
-    except GitHubNotFoundError:
-        # PR or repo deleted between build_context and post_review.
-        # Nothing to post to. Still save the review to Postgres so the
-        # verdict is visible via GET /api/v1/reviews (e.g. local demo).
-        logger.error(
-            "post_review | pr_not_found | repo=%s pr=%d workflow=%s",
-            state["repo_full_name"],
-            state["pr_number"],
-            state["workflow_id"],
-        )
-        try:
-            from backend.database.postgres import get_engine
-            from backend.database.repository import save_review
-            from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-            _factory = async_sessionmaker(
-                bind=get_engine(), class_=AsyncSession, expire_on_commit=False
-            )
-            async with _factory() as session:
-                await save_review(
-                    session,
-                    review_id=state["workflow_id"],
-                    repo_full_name=state["repo_full_name"],
-                    pr_number=state["pr_number"],
-                    pr_title=state["pr_title"],
-                    head_commit_sha=state["head_commit_sha"],
-                    pr_diff=state["pr_diff"],
-                    verdict=state["verdict"].value if state["verdict"] else None,
-                    status=ReviewStatus.COMPLETED.value,
-                    overall_confidence=state["overall_confidence"],
-                    needs_human_review=state["needs_human_review"],
-                    human_review_reason=state["human_review_reason"],
-                    findings=state["final_findings"],
-                    github_review_id=None,
-                )
-        except Exception as db_err:
-            logger.error("post_review | pr_not_found | postgres_save_failed | %s", db_err)
-        return {
-            "review_posted": False,
-            "github_review_id": None,
-            "status": ReviewStatus.COMPLETED,
-        }
-
-    except GitHubAPIError as e:
-        # Non-retryable error (e.g. 403 Forbidden — token lacks write scope,
-        # or 422 Unprocessable — bad payload, or 401 — fake/demo repo).
-        # Route to HITL, but ALWAYS save to DB so the verdict is retrievable.
-        logger.error(
-            "post_review | github_api_error | status=%s error=%s response_body=%s workflow=%s "
-            "— routing to HITL",
-            e.status_code,
-            str(e),
-            getattr(e, "response_body", ""),
-            state["workflow_id"],
-        )
-        # BUG FIX (demo-day Bug #5): Save to DB even when GitHub post fails.
-        # This is the key demo path: the repo is fake so GitHub returns 401,
-        # but the LLM analysis is real and must be persisted.
-        try:
-            from backend.database.postgres import get_engine
-            from backend.database.repository import save_review
-            from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-            _factory = async_sessionmaker(
-                bind=get_engine(), class_=AsyncSession, expire_on_commit=False
-            )
-            async with _factory() as session:
-                await save_review(
-                    session,
-                    review_id=state["workflow_id"],
-                    repo_full_name=state["repo_full_name"],
-                    pr_number=state["pr_number"],
-                    pr_title=state["pr_title"],
-                    head_commit_sha=state["head_commit_sha"],
-                    pr_diff=state["pr_diff"],
-                    verdict=state["verdict"].value if state["verdict"] else None,
-                    status=ReviewStatus.COMPLETED.value,
-                    overall_confidence=state["overall_confidence"],
-                    needs_human_review=state["needs_human_review"],
-                    human_review_reason=state["human_review_reason"],
-                    findings=state["final_findings"],
-                    github_review_id=None,
-                )
-        except Exception as db_err:
-            logger.error("post_review | github_api_error | postgres_save_failed | %s", db_err)
-        return {
-            "review_posted": False,
-            "github_review_id": None,
+            "review_posted": bool(github_review_id),
+            "github_review_id": github_review_id,
             "status": ReviewStatus.COMPLETED,
         }
 
     # -------------------------------------------------------------------------
-    # Step 3: Write to Postgres
-    #
-    # WIKI: DDIA / Transactions-and-Isolation
-    #   "Atomicity: only write github_review_id AFTER GitHub confirms."
-    #   -> We reach this line ONLY if GitHub returned 2xx above.
-    #
-    # FAULT HANDLING:
-    #   If Postgres is down, the review is ALREADY LIVE on GitHub.
-    #   This is a FAULT, not a FAILURE. We log ERROR and return
-    #   review_posted=True anyway — the review was posted successfully.
-    #
-    # WIKI: DDIA / Reliability-Scalability
-    #   "A fault is one component deviating from spec."
-    #   -> Postgres failing after a successful GitHub post is a fault in
-    #      the Postgres component. The GitHub component succeeded.
-    #      Do not undo the GitHub post. The DB record can be re-created
-    #      from the GitHub audit log (Phase 19).
+    # Save to Postgres (comment already posted above for both paths)
     # -------------------------------------------------------------------------
     try:
         from backend.database.postgres import get_engine
@@ -1033,26 +837,12 @@ async def post_review(state: PRReviewState) -> dict[str, Any]:
                 findings=state["final_findings"],
                 github_review_id=github_review_id,
             )
-        logger.info(
-            "post_review | postgres_save_ok | workflow=%s",
-            state["workflow_id"],
-        )
-
+        logger.info("post_review | postgres_save_ok | workflow=%s", state["workflow_id"])
     except Exception as e:
-        # Postgres failure AFTER a successful GitHub post.
-        # The review is live on GitHub. This is a recoverable fault.
-        # Log ERROR (not exception re-raise) so the pipeline returns normally.
-        logger.error(
-            "post_review | postgres_save_failed | workflow=%s error=%s "
-            "— review is LIVE on GitHub (id=%s) but not saved to DB. "
-            "Recoverable from GitHub audit log.",
-            state["workflow_id"],
-            str(e),
-            github_review_id,
-        )
+        logger.error("post_review | postgres_save_failed | workflow=%s error=%s", state["workflow_id"], e)
 
     return {
-        "review_posted": True,
+        "review_posted": bool(github_review_id),
         "github_review_id": github_review_id,
         "status": ReviewStatus.COMPLETED,
     }
@@ -1106,41 +896,11 @@ def _compute_agent_confidence(findings: list[dict[str, Any]]) -> float:
 
 def _verdict_to_review_event(verdict: ReviewVerdict | None) -> ReviewEvent:
     """
-    Maps our internal ReviewVerdict to GitHub's ReviewEvent enum.
-
-    GitHub accepts three events for POST /pulls/{n}/reviews:
-      APPROVE          — no significant issues, ready to merge
-      REQUEST_CHANGES  — issues found, developer must address before merging
-      COMMENT          — informational only, does not block merge
-
-    WIKI: Operations-Patterns.md
-      "Trust, but verify."
-      -> We use COMMENT for NEEDS_HUMAN_REVIEW (not APPROVE or REQUEST_CHANGES)
-         because the AI is uncertain. A COMMENT event does not block merge
-         and signals clearly that a human needs to look.
-      -> We never call DISMISS here — that requires an existing review ID.
-
-    Args:
-        verdict: our ReviewVerdict enum value, or None if aggregate_results
-                 didn't run (shouldn't happen in normal flow)
-
-    Returns:
-        ReviewEvent enum value for the GitHub API payload
+    Always returns COMMENT — the bot is a guide, not an approver.
+    It posts findings and recommendations as comments on the PR.
+    It never approves or blocks the PR directly.
     """
-    if verdict == ReviewVerdict.APPROVE:
-        return ReviewEvent.APPROVE
-    elif verdict == ReviewVerdict.REQUEST_CHANGES:
-        # WHY COMMENT not REQUEST_CHANGES:
-        #   GitHub rejects REQUEST_CHANGES when the reviewer is the same user
-        #   who opened the PR (HTTP 422: "Can not request changes on your own
-        #   pull request"). In production with a dedicated bot account (Phase 16)
-        #   this would be REQUEST_CHANGES. For now COMMENT carries the same full
-        #   verdict body + all findings and is always accepted by the API.
-        return ReviewEvent.COMMENT
-    else:
-        # NEEDS_HUMAN_REVIEW or None -> post as COMMENT
-        # Does not block merge; signals uncertainty clearly.
-        return ReviewEvent.COMMENT
+    return ReviewEvent.COMMENT
 
 
 def _findings_to_review_comments(
@@ -1245,11 +1005,11 @@ def _build_review_summary(
 
     # ── Verdict badge ─────────────────────────────────────────────────────────
     if verdict == ReviewVerdict.APPROVE:
-        verdict_badge = "✅ **APPROVED** — No significant issues found."
+        verdict_badge = "✅ **CAN BE APPROVED** — No significant issues found by AI agents."
     elif verdict == ReviewVerdict.REQUEST_CHANGES:
-        verdict_badge = "🔴 **CHANGES REQUESTED** — Issues found that must be addressed."
+        verdict_badge = "🔶 **CHANGES SUGGESTED** — Issues found that should be addressed before merging."
     else:
-        verdict_badge = "⚠️ **NEEDS HUMAN REVIEW** — AI confidence too low to auto-approve."
+        verdict_badge = "⚠️ **HUMAN REVIEW RECOMMENDED** — AI confidence too low to make a recommendation."
 
     # ── Severity counts ───────────────────────────────────────────────────────
     severity_counts: dict[str, int] = {"critical": 0, "high": 0, "medium": 0, "low": 0}
