@@ -47,7 +47,7 @@ import time
 from typing import Any
 
 from backend.config import get_settings
-from backend.integrations.github_client import GitHubClient, GitHubAPIError, GitHubNotFoundError, GitHubRateLimitError
+from backend.integrations.github_client import GitHubClient
 from backend.integrations.github_models import PostReviewPayload, ReviewEvent, ReviewComment
 from backend.memory.context_retriever import retrieve_context_for_diff
 from backend.models.enums import FindingSeverity, ReviewStatus, ReviewVerdict

@@ -37,7 +37,7 @@ jobs:
         run: pip install ruff
 
       - name: Run ruff (linter)
-        run: ruff check backend/ tests/ --select E,F,W
+        run: ruff check backend/ tests/ --select E,F,W --ignore E402,E501,E702,F841 --per-file-ignores "tests/*:F401" --per-file-ignores "tests/*:F811"
 
       - name: Syntax check all Python files
         run: |

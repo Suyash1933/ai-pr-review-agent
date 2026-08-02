@@ -117,7 +117,6 @@ async def require_auth(
     jwt_token = request.cookies.get(COOKIE_NAME)
     if jwt_token and settings.jwt_secret:
         try:
-            import jwt as pyjwt
             decode_access_token(jwt_token, settings.jwt_secret)
             logger.debug("require_auth | OK (JWT cookie) | path=%s", request.url.path)
             return

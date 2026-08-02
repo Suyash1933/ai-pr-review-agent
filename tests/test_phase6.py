@@ -31,7 +31,6 @@ from __future__ import annotations
 import asyncio
 import sys
 import uuid
-from typing import get_type_hints
 
 # ---------------------------------------------------------------------------
 # Setup path so local imports work

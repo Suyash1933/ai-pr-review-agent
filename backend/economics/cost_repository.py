@@ -298,7 +298,6 @@ async def get_agent_health(
         WHERE bucket >= now() - make_interval(mins => $1)
         ORDER BY bucket DESC, agent
     """
-    import asyncpg
     async with pool.acquire() as conn:
         rows = await conn.fetch(sql, minutes)
     return [dict(r) for r in rows]
@@ -324,7 +323,7 @@ async def get_pr_cost(
         WHERE review_id = $1
         GROUP BY review_id
     """
-    import asyncpg, uuid
+    import uuid
     async with pool.acquire() as conn:
         row = await conn.fetchrow(sql, uuid.UUID(review_id))
     return dict(row) if row else None
@@ -342,6 +341,5 @@ async def get_daily_cost_from_tiger(
         FROM agent_health_1m
         WHERE bucket >= now() - INTERVAL '24 hours'
     """
-    import asyncpg
     async with pool.acquire() as conn:
         return float(await conn.fetchval(sql))

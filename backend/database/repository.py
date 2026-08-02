@@ -352,7 +352,7 @@ async def list_reviews(
     if user_id is not None:
         from sqlalchemy import or_
         # Show reviews owned by this user OR unassigned (legacy/pre-OAuth)
-        conditions.append(or_(PRReviewRecord.user_id == user_id, PRReviewRecord.user_id == None))
+        conditions.append(or_(PRReviewRecord.user_id == user_id, PRReviewRecord.user_id.is_(None)))
     if repo_full_name is not None:
         conditions.append(PRReviewRecord.repo_full_name == repo_full_name)
     if status is not None:
