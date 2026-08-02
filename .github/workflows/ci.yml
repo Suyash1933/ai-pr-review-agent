@@ -1,0 +1,183 @@
+# .github/workflows/ci.yml
+#
+# CI pipeline for ai-pr-review-agent.
+#
+# JOBS:
+#   1. lint           — ruff + syntax check (fast, ~30s)
+#   2. backend-test   — pytest with mocked LLM (no API keys needed)
+#   3. frontend-build — next build (catches TypeScript/import errors)
+#   4. docker-build   — Dockerfile builds successfully
+#   5. eval-gate      — real OpenAI calls (only on push to main)
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+
+  # ---------------------------------------------------------------------------
+  # JOB 1: Lint
+  # ---------------------------------------------------------------------------
+  lint:
+    name: Lint (ruff + syntax)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Run ruff (linter)
+        run: ruff check backend/ tests/ --select E,F,W
+
+      - name: Syntax check all Python files
+        run: |
+          find backend tests -name "*.py" | xargs python3 -m py_compile
+          echo "All Python files parse cleanly."
+
+  # ---------------------------------------------------------------------------
+  # JOB 2: Backend tests (mocked LLM, no containers)
+  # ---------------------------------------------------------------------------
+  backend-test:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    needs: lint
+
+    env:
+      APP_ENV: test
+      DATABASE_URL: "postgresql+asyncpg://test:test@localhost:5432/test"
+      REDIS_URL: "redis://localhost:6379"
+      OPENAI_API_KEY: "sk-test-placeholder-not-real"
+      ANTHROPIC_API_KEY: "test-placeholder"
+      OPENAI_EMBEDDING_MODEL: "text-embedding-3-small"
+      SECURITY_PROVIDER: "openai"
+      SECURITY_MODEL: "gpt-4o"
+      GITHUB_WEBHOOK_SECRET: "test-secret"
+      GITHUB_TOKEN: "ghp-test-placeholder"
+      GITHUB_API_BASE_URL: "https://api.github.com"
+      LOG_LEVEL: "ERROR"
+      API_KEY: "test-api-key"
+      CONFIDENCE_THRESHOLD: "0.85"
+      WORKFLOW_TIMEOUT_SECONDS: "300"
+      MAX_CONCURRENT_REVIEWS: "5"
+      JWT_SECRET: "test-jwt-secret-for-ci-only"
+      FRONTEND_URL: "http://localhost:3000"
+      WEBHOOK_BASE_URL: "http://localhost:8001"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Run backend tests
+        run: python3 -m pytest tests/ -v --tb=short -x --ignore=tests/eval_gate.py
+
+  # ---------------------------------------------------------------------------
+  # JOB 3: Frontend build check
+  # ---------------------------------------------------------------------------
+  frontend-build:
+    name: Frontend build
+    runs-on: ubuntu-latest
+    needs: lint
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Build
+        env:
+          NEXT_PUBLIC_API_BASE_URL: "http://localhost:8001"
+        run: npm run build
+
+  # ---------------------------------------------------------------------------
+  # JOB 4: Docker build check
+  # ---------------------------------------------------------------------------
+  docker-build:
+    name: Docker build
+    runs-on: ubuntu-latest
+    needs: lint
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t ai-pr-review-agent:ci .
+
+      - name: Verify image runs
+        run: |
+          docker run --rm ai-pr-review-agent:ci python -c "import backend; print('Backend imports OK')"
+
+  # ---------------------------------------------------------------------------
+  # JOB 5: Eval gate (real OpenAI calls — main branch only)
+  # ---------------------------------------------------------------------------
+  eval-gate:
+    name: Eval gate (real LLM)
+    runs-on: ubuntu-latest
+    needs: backend-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    env:
+      APP_ENV: test
+      DATABASE_URL: "postgresql+asyncpg://test:test@localhost:5432/test"
+      REDIS_URL: "redis://localhost:6379"
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ANTHROPIC_API_KEY: "test-placeholder"
+      OPENAI_EMBEDDING_MODEL: "text-embedding-3-small"
+      SECURITY_PROVIDER: "openai"
+      SECURITY_MODEL: "gpt-4o"
+      GITHUB_WEBHOOK_SECRET: "test-secret"
+      GITHUB_TOKEN: "ghp-test-placeholder"
+      GITHUB_API_BASE_URL: "https://api.github.com"
+      LOG_LEVEL: "INFO"
+      API_KEY: "test-api-key"
+      CONFIDENCE_THRESHOLD: "0.85"
+      WORKFLOW_TIMEOUT_SECONDS: "300"
+      MAX_CONCURRENT_REVIEWS: "5"
+      JWT_SECRET: "test-jwt-secret-for-ci-only"
+      FRONTEND_URL: "http://localhost:3000"
+      WEBHOOK_BASE_URL: "http://localhost:8001"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Run eval gate
+        run: python3 -m pytest tests/eval_gate.py -v -s --timeout=120
