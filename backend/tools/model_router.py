@@ -98,11 +98,11 @@ class ModelConfig:
 
 _ROUTING_TABLE: dict[AgentType, ModelConfig] = {
 
-    # Security agent: Groq Llama 3.3 70B (free, strong reasoning)
+    # Security agent: Gemini 2.0 Flash (free, strong reasoning)
     # Override via SECURITY_PROVIDER and SECURITY_MODEL env vars
     AgentType.SECURITY: ModelConfig(
-        provider=os.environ.get("SECURITY_PROVIDER", "groq"),
-        model_name=os.environ.get("SECURITY_MODEL", "llama-3.3-70b-versatile"),
+        provider=os.environ.get("SECURITY_PROVIDER", "gemini"),
+        model_name=os.environ.get("SECURITY_MODEL", "gemini-2.0-flash"),
         context_budget_tokens=8000,
         max_response_tokens=2048,
     ),
