@@ -83,6 +83,8 @@ dev = [
     "ruff>=0.4.0",
     # SQLite async driver for in-memory test DB
     "aiosqlite>=0.20.0",
+    # Test timeout support (used by eval_gate --timeout=120)
+    "pytest-timeout>=2.3.0",
 ]
 
 [build-system]
