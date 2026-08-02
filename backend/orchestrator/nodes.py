@@ -656,7 +656,7 @@ async def aggregate_results(state: PRReviewState) -> dict[str, Any]:
     # -------------------------------------------------------------------------
     # Rule 3: Overall confidence < threshold -> uncertain -> HITL
     # -------------------------------------------------------------------------
-    if overall_confidence < threshold:
+    if overall_confidence <= threshold:
         reason = (
             f"Overall confidence {overall_confidence:.2f} is below "
             f"threshold {threshold:.2f}. Routing to approval queue."
