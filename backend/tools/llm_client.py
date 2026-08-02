@@ -108,7 +108,7 @@ _TOKEN_COSTS: dict[str, dict[str, float]] = {
     "gemini-1.5-flash":          {"input": 0.0,     "output": 0.0},
     "gemini-1.5-pro":            {"input": 0.00125, "output": 0.005},
     # Groq models (free tier pricing = $0)
-    "llama-3.1-70b-versatile":   {"input": 0.0,     "output": 0.0},
+    "llama-3.3-70b-versatile":   {"input": 0.0,     "output": 0.0},
     "llama-3.1-8b-instant":      {"input": 0.0,     "output": 0.0},
     "mixtral-8x7b-32768":        {"input": 0.0,     "output": 0.0},
 }
