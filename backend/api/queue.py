@@ -119,12 +119,51 @@ async def get_queue_endpoint(
 
 
 # =============================================================================
-# PHASE 19 PLACEHOLDERS
+# GET /api/v1/queue/active
 #
-# The HITL action endpoints (approve, reject) belong here.
-# They are NOT implemented yet — Phase 19 owns that work.
-# The stubs are documented here so Phase 19 can find the right file.
+# Returns workflows currently in progress (from Redis, not DB).
+# Used by the global ReviewBanner component to show real-time status.
 # =============================================================================
+
+@router.get(
+    "/queue/active",
+    summary="Get active reviews in progress",
+)
+async def get_active_reviews(
+    _auth: None = Depends(require_auth),
+) -> list[dict]:
+    """Returns workflows currently being processed (status from Redis)."""
+    from backend.memory.redis_client import redis_client
+
+    active = []
+    try:
+        pool = redis_client._client
+        if not pool:
+            return []
+
+        # Scan for workflow status keys
+        keys = []
+        async for key in pool.scan_iter(match="workflow:status:*", count=100):
+            keys.append(key)
+
+        for key in keys:
+            status = await pool.get(key)
+            if status and status in ("in_progress", "agents_running", "aggregating", "posting", "queued"):
+                # Extract workflow_id from key: "workflow:status:{workflow_id}"
+                workflow_id = key.replace("workflow:status:", "")
+                parts = workflow_id.split(":")
+                repo = parts[0] if parts else "unknown"
+                pr = int(parts[1]) if len(parts) > 1 else 0
+                active.append({
+                    "workflow_id": workflow_id,
+                    "repo_full_name": repo,
+                    "pr_number": pr,
+                    "status": status,
+                })
+    except Exception as e:
+        logger.warning("get_active_reviews | error=%s", e)
+
+    return active
 
 # TODO Phase 19: POST /api/v1/queue/{review_id}/approve
 #   - Load the review from Postgres

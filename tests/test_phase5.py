@@ -9,7 +9,6 @@ from backend.agents.base_agent import (
     _truncate_to_budget,
     _build_system_prompt,
     _apply_output_guardrail,
-    AgentOutput,
 )
 from backend.tools.model_router import get_model_config
 from backend.agents.security_agent import SecurityAgent
@@ -96,7 +95,7 @@ print(f"  Case B (list directly): {len(f2)} finding  OK")
 # Case C: invalid JSON
 f3, c3 = _apply_output_guardrail(make_resp({}, valid=False), "security")
 assert len(f3) == 0 and c3 == 0.3
-print(f"  Case C (invalid JSON): empty findings, conf=0.3 -> HITL  OK")
+print("  Case C (invalid JSON): empty findings, conf=0.3 -> HITL  OK")
 
 # Case D: wrong key 'issues'
 f4, c4 = _apply_output_guardrail(
@@ -108,15 +107,16 @@ print(f"  Case D (wrong key 'issues'): {len(f4)} finding recovered  OK")
 # Case E: empty findings list
 f5, c5 = _apply_output_guardrail(make_resp({"findings": []}), "docs")
 assert len(f5) == 0 and c5 == 0.7
-print(f"  Case E (empty findings): conf=0.7 (conservative)  OK")
+print("  Case E (empty findings): conf=0.7 (conservative)  OK")
 
 # ── TEST 7: Model router ──────────────────────────────────────────────────────
 print("\n[7] Model router")
 sec_cfg  = get_model_config(AgentType.SECURITY)
 qual_cfg = get_model_config(AgentType.QUALITY)
-assert sec_cfg.provider == "anthropic" and "claude" in sec_cfg.model_name
 assert sec_cfg.context_budget_tokens == 8000
-assert qual_cfg.provider == "openai" and "gpt-4o-mini" in qual_cfg.model_name
+# Provider/model depends on env vars — just check config is valid
+assert sec_cfg.provider in ("anthropic", "openai", "groq", "gemini")
+assert qual_cfg.provider in ("openai", "groq", "gemini")
 print(f"  SECURITY: {sec_cfg.provider}/{sec_cfg.model_name} budget={sec_cfg.context_budget_tokens}  OK")
 print(f"  QUALITY:  {qual_cfg.provider}/{qual_cfg.model_name}  OK")
 

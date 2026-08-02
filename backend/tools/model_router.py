@@ -110,7 +110,7 @@ _ROUTING_TABLE: dict[AgentType, ModelConfig] = {
     # Quality agent: Groq Llama 3.1 70B (free, fast, good at pattern matching)
     AgentType.QUALITY: ModelConfig(
         provider=os.environ.get("QUALITY_PROVIDER", "groq"),
-        model_name=os.environ.get("QUALITY_MODEL", "llama-3.1-70b-versatile"),
+        model_name=os.environ.get("QUALITY_MODEL", "llama-3.3-70b-versatile"),
         context_budget_tokens=6000,
         max_response_tokens=2048,
     ),
@@ -118,7 +118,7 @@ _ROUTING_TABLE: dict[AgentType, ModelConfig] = {
     # Test agent: Groq Llama 3.1 70B (free)
     AgentType.TEST: ModelConfig(
         provider=os.environ.get("TEST_PROVIDER", "groq"),
-        model_name=os.environ.get("TEST_MODEL", "llama-3.1-70b-versatile"),
+        model_name=os.environ.get("TEST_MODEL", "llama-3.3-70b-versatile"),
         context_budget_tokens=5000,
         max_response_tokens=2048,
     ),

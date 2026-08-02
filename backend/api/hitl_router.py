@@ -315,3 +315,33 @@ async def rebuild_queue(
             else "Redis queue already populated or no pending items in Postgres."
         ),
     }
+
+
+# ---------------------------------------------------------------------------
+# DELETE /api/v1/hitl/{hitl_id}
+# ---------------------------------------------------------------------------
+@hitl_router.delete(
+    "/{hitl_id}",
+    summary="Delete a HITL queue item",
+)
+async def delete_hitl_item(
+    hitl_id: str,
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, str]:
+    """Delete a HITL item from the queue permanently."""
+    from sqlalchemy import select, delete as sql_delete
+
+    result = await session.execute(
+        select(HITLReview).where(HITLReview.id == hitl_id)
+    )
+    item = result.scalar_one_or_none()
+    if not item:
+        raise HTTPException(status_code=404, detail="HITL item not found.")
+
+    await session.execute(
+        sql_delete(HITLReview).where(HITLReview.id == hitl_id)
+    )
+    await session.commit()
+
+    logger.info("hitl_deleted | id=%s repo=%s pr=%d", hitl_id, item.repo_full_name, item.pr_number)
+    return {"status": "deleted", "id": hitl_id}

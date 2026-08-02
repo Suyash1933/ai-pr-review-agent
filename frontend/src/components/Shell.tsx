@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import clsx from "clsx";
 import { UserMenu } from "./UserMenu";
+import { ReviewBanner } from "./ReviewBanner";
 
 const NAV = [
   { href: "/", label: "Dashboard" },
@@ -51,7 +52,10 @@ export function Shell({ children }: { children: React.ReactNode }) {
           phase 2 · polling
         </div>
       </aside>
-      <main className="flex-1 px-8 py-6 overflow-x-hidden">{children}</main>
+      <main className="flex-1 px-8 py-6 overflow-x-hidden">
+        <ReviewBanner />
+        {children}
+      </main>
     </div>
   );
 }

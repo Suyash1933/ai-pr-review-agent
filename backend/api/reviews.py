@@ -247,3 +247,33 @@ async def get_review_endpoint(
     )
 
     return detail
+
+
+# =============================================================================
+# DELETE /api/v1/reviews/{review_id}
+# =============================================================================
+
+@router.delete(
+    "/reviews/{review_id:path}",
+    summary="Delete a PR review",
+)
+async def delete_review_endpoint(
+    review_id: str,
+    _auth: None = Depends(require_auth),
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, str]:
+    """Delete a review and all its findings permanently."""
+    from sqlalchemy import delete as sql_delete
+    from backend.database.models import PRReviewRecord
+
+    record = await get_review(session, review_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"Review '{review_id}' not found.")
+
+    await session.execute(
+        sql_delete(PRReviewRecord).where(PRReviewRecord.id == review_id)
+    )
+    await session.commit()
+
+    logger.info("DELETE /api/v1/reviews/%s -> deleted", review_id)
+    return {"status": "deleted", "id": review_id}

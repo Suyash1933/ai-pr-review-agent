@@ -29,7 +29,6 @@
 
 import asyncio
 import json
-import logging
 import sys
 import time
 from unittest.mock import patch
@@ -178,7 +177,6 @@ def run_all_tests():
 
     # ─── Test 1: PRMetadata parses GitHub JSON correctly ─────────────────────
     async def test_pr_metadata_parsing():
-        from backend.integrations.github_client import GitHubClient
         from backend.integrations.github_models import PRMetadata
 
         def handler(request: httpx.Request) -> httpx.Response:
@@ -203,7 +201,6 @@ def run_all_tests():
 
     # ─── Test 2: get_pr_diff returns raw diff string ──────────────────────────
     async def test_get_pr_diff():
-        from backend.integrations.github_client import GitHubClient
 
         def handler(request: httpx.Request) -> httpx.Response:
             return mock_response(200, SAMPLE_DIFF)
@@ -224,7 +221,6 @@ def run_all_tests():
 
     # ─── Test 3: get_pr_files returns list[PRFile] ────────────────────────────
     async def test_get_pr_files():
-        from backend.integrations.github_client import GitHubClient
         from backend.integrations.github_models import PRFile, PRFileStatus
 
         def handler(request: httpx.Request) -> httpx.Response:
