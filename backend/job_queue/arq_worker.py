@@ -188,12 +188,12 @@ async def run_pr_review(
     # The review result has already been saved — nothing is lost.
     # -------------------------------------------------------------------------
     if result.status.value == "completed":
-        repo_full_name = input_data.get("repo_full_name", "")  # flat key set by webhook router
-        if repo_full_name:
+        repo_full_name = input_data.get("repo_full_name", "")
+        cfg = get_settings()
+        # Only enqueue ingestion if OpenAI key is configured (embeddings need it)
+        if repo_full_name and cfg.openai_api_key and cfg.openai_api_key != "sk-test-placeholder-not-real":
             try:
-                # Build settings inline — WorkerSettings is defined later in this
-                # file, so we can't reference it here without a forward reference.
-                arq_redis = await create_pool(RedisSettings.from_dsn(get_settings().redis_url))
+                arq_redis = await create_pool(RedisSettings.from_dsn(cfg.redis_url))
                 await arq_redis.enqueue_job(
                     "ingest_repository_job",
                     repo_full_name,

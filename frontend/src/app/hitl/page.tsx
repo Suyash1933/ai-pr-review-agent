@@ -13,7 +13,9 @@ export default function HITLQueuePage() {
   const [deleting, setDeleting] = useState<string | null>(null);
 
   const items = data?.items ?? [];
-  const pending = items.filter((h) => h.status === "pending" || h.status === "in_review");
+  const pending = items
+    .filter((h) => h.status === "pending" || h.status === "in_review")
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
   const handleDelete = async (e: React.MouseEvent, id: string) => {
     e.preventDefault();
@@ -36,7 +38,7 @@ export default function HITLQueuePage() {
       <div>
         <h1 className="text-2xl font-semibold">HITL Queue</h1>
         <p className="text-muted text-sm mt-1">
-          Items escalated by 2+ agents flagging CRITICAL.
+          Items escalated by low confidence or critical findings.
           {pending.length > 0 && (
             <span className="text-warn ml-2">{pending.length} pending</span>
           )}
@@ -51,7 +53,7 @@ export default function HITLQueuePage() {
         <Empty>Queue is clear.</Empty>
       ) : (
         <div className="border border-border rounded-lg bg-panel divide-y divide-border">
-          {pending.map((h) => (
+          {pending.map((h, index) => (
             <div
               key={h.id}
               className="flex items-start justify-between px-4 py-3 hover:bg-bg gap-4"
@@ -61,6 +63,7 @@ export default function HITLQueuePage() {
                 className="min-w-0 flex-1"
               >
                 <div className="font-mono text-sm truncate">
+                  <span className="text-muted mr-2">#{pending.length - index}</span>
                   {h.repo_full_name} #{h.pr_number}
                 </div>
                 <div className="text-sm text-muted mt-0.5 truncate">
