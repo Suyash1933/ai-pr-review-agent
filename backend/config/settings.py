@@ -144,13 +144,19 @@ class Settings(BaseSettings):
     # LLM Providers
     # -------------------------------------------------------------------------
 
-    # OpenAI API key — used for quality, test, docs agents (cheaper models)
-    # REQUIRED
-    openai_api_key: str
+    # OpenAI API key — optional, used if SECURITY_PROVIDER=openai
+    openai_api_key: str = ""
 
-    # Anthropic API key — used for security agent (stronger reasoning)
-    # REQUIRED
-    anthropic_api_key: str
+    # Anthropic API key — optional, used if SECURITY_PROVIDER=anthropic
+    anthropic_api_key: str = ""
+
+    # Google Gemini API key — used for security agent (free tier: 15 RPM)
+    # Get at: https://aistudio.google.com/apikey
+    gemini_api_key: str = ""
+
+    # Groq API key — used for quality, test, docs agents (free tier: 30 RPM)
+    # Get at: https://console.groq.com/keys
+    groq_api_key: str = ""
 
     # -------------------------------------------------------------------------
     # Application Settings

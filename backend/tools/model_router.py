@@ -98,48 +98,37 @@ class ModelConfig:
 
 _ROUTING_TABLE: dict[AgentType, ModelConfig] = {
 
+    # Security agent: Gemini 2.0 Flash (free, strong reasoning)
+    # Override via SECURITY_PROVIDER and SECURITY_MODEL env vars
     AgentType.SECURITY: ModelConfig(
-        # Security agent: Claude 3.5 Sonnet preferred for deep security reasoning.
-        # Falls back to gpt-4o if SECURITY_PROVIDER=openai is set in env.
-        provider=os.environ.get("SECURITY_PROVIDER", "anthropic"),
-        model_name=os.environ.get(
-            "SECURITY_MODEL",
-            "claude-3-5-sonnet-20241022" if os.environ.get("SECURITY_PROVIDER", "anthropic") == "anthropic" else "gpt-4o",
-        ),
+        provider=os.environ.get("SECURITY_PROVIDER", "gemini"),
+        model_name=os.environ.get("SECURITY_MODEL", "gemini-2.0-flash"),
         context_budget_tokens=8000,
         max_response_tokens=2048,
     ),
 
+    # Quality agent: Groq Llama 3.1 70B (free, fast, good at pattern matching)
     AgentType.QUALITY: ModelConfig(
-        provider="openai",
-        # Default: gpt-4o-mini (fast, cheap, good at pattern matching)
-        # Override: QUALITY_MODEL env var
-        model_name=os.environ.get(
-            "QUALITY_MODEL",
-            "gpt-4o-mini",
-        ),
-        context_budget_tokens=6000,  # Needs function-level context
+        provider=os.environ.get("QUALITY_PROVIDER", "groq"),
+        model_name=os.environ.get("QUALITY_MODEL", "llama-3.1-70b-versatile"),
+        context_budget_tokens=6000,
         max_response_tokens=2048,
     ),
 
+    # Test agent: Groq Llama 3.1 70B (free)
     AgentType.TEST: ModelConfig(
-        provider="openai",
-        model_name=os.environ.get(
-            "TEST_MODEL",
-            "gpt-4o-mini",
-        ),
-        context_budget_tokens=5000,  # Needs to see what was added
+        provider=os.environ.get("TEST_PROVIDER", "groq"),
+        model_name=os.environ.get("TEST_MODEL", "llama-3.1-70b-versatile"),
+        context_budget_tokens=5000,
         max_response_tokens=2048,
     ),
 
+    # Docs agent: Groq Llama 3.1 8B (free, fastest, cheapest task)
     AgentType.DOCS: ModelConfig(
-        provider="openai",
-        model_name=os.environ.get(
-            "DOCS_MODEL",
-            "gpt-4o-mini",
-        ),
-        context_budget_tokens=4000,  # Only needs function signatures
-        max_response_tokens=1024,    # Docs findings are shorter
+        provider=os.environ.get("DOCS_PROVIDER", "groq"),
+        model_name=os.environ.get("DOCS_MODEL", "llama-3.1-8b-instant"),
+        context_budget_tokens=4000,
+        max_response_tokens=1024,
     ),
 }
 

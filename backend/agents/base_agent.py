@@ -563,6 +563,22 @@ class BaseAgent(ABC):
                 system_prompt=system,
                 max_tokens=config.max_response_tokens,
             )
+        elif config.provider == "gemini":
+            return await self._client.call_gemini(
+                model=config.model_name,
+                messages=messages,
+                system_prompt=system,
+                json_mode=True,
+                max_tokens=config.max_response_tokens,
+            )
+        elif config.provider == "groq":
+            return await self._client.call_groq(
+                model=config.model_name,
+                messages=messages,
+                system_prompt=system,
+                json_mode=True,
+                max_tokens=config.max_response_tokens,
+            )
         else:
             raise ValueError(
                 f"Unknown provider '{config.provider}' in ModelConfig. "

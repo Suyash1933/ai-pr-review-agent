@@ -103,6 +103,14 @@ _TOKEN_COSTS: dict[str, dict[str, float]] = {
     # Anthropic models
     "claude-3-5-sonnet-20241022": {"input": 0.003,  "output": 0.015},
     "claude-3-haiku-20240307":    {"input": 0.00025,"output": 0.00125},
+    # Google Gemini models (free tier pricing = $0, paid tier below)
+    "gemini-2.0-flash":          {"input": 0.0,     "output": 0.0},
+    "gemini-1.5-flash":          {"input": 0.0,     "output": 0.0},
+    "gemini-1.5-pro":            {"input": 0.00125, "output": 0.005},
+    # Groq models (free tier pricing = $0)
+    "llama-3.1-70b-versatile":   {"input": 0.0,     "output": 0.0},
+    "llama-3.1-8b-instant":      {"input": 0.0,     "output": 0.0},
+    "mixtral-8x7b-32768":        {"input": 0.0,     "output": 0.0},
 }
 
 
@@ -503,6 +511,180 @@ class LLMClient:
 
         raise AgentError(
             f"Anthropic call failed after {self.MAX_RETRIES + 1} attempts: {last_error}",
+            agent_name=model,
+        ) from last_error
+
+    async def call_gemini(
+        self,
+        model: str,
+        messages: list[dict[str, str]],
+        system_prompt: str,
+        json_mode: bool = True,
+        max_tokens: int = 2048,
+        api_key: str | None = None,
+    ) -> LLMResponse:
+        """
+        Makes one call to the Google Gemini API using the OpenAI-compatible endpoint.
+        Free tier: 15 requests/minute, 1M tokens/day.
+        """
+        from backend.config import get_settings
+        cfg = get_settings()
+        key = api_key or cfg.gemini_api_key
+
+        # Gemini supports OpenAI-compatible API via generativelanguage.googleapis.com
+        client = openai.AsyncOpenAI(
+            api_key=key,
+            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+        )
+
+        full_messages = [{"role": "system", "content": system_prompt}] + messages
+        response_format = {"type": "json_object"} if json_mode else {"type": "text"}
+
+        last_error: Exception | None = None
+        for attempt in range(self.MAX_RETRIES + 1):
+            start = time.monotonic()
+            try:
+                response = await client.chat.completions.create(
+                    model=model,
+                    messages=full_messages,
+                    response_format=response_format,
+                    max_tokens=max_tokens,
+                    temperature=0.1,
+                )
+
+                latency = time.monotonic() - start
+                raw_content = response.choices[0].message.content or "{}"
+                input_tokens = response.usage.prompt_tokens if response.usage else 0
+                output_tokens = response.usage.completion_tokens if response.usage else 0
+
+                is_valid_json = True
+                try:
+                    parsed = json.loads(raw_content)
+                except json.JSONDecodeError:
+                    logger.warning("gemini_json_parse_failed | model=%s attempt=%d", model, attempt)
+                    parsed = _try_extract_json(raw_content)
+                    is_valid_json = bool(parsed)
+
+                cost = _compute_cost(model, input_tokens, output_tokens)
+                logger.info(
+                    "gemini_call | model=%s input_tokens=%d output_tokens=%d latency=%.2fs cost=$%.6f",
+                    model, input_tokens, output_tokens, latency, cost,
+                )
+
+                await _persist_call_log(
+                    model=model, input_tokens=input_tokens, output_tokens=output_tokens,
+                    cost_usd=cost, latency_seconds=latency, is_valid_json=is_valid_json,
+                )
+
+                return LLMResponse(
+                    content=parsed, input_tokens=input_tokens, output_tokens=output_tokens,
+                    model_used=model, latency_seconds=round(latency, 3),
+                    estimated_cost_usd=cost, is_valid_json=is_valid_json,
+                )
+
+            except openai.RateLimitError as e:
+                last_error = e
+                delay = self.BASE_RETRY_DELAY * (2 ** attempt)
+                logger.warning("gemini_rate_limit | model=%s attempt=%d/%d | waiting %.1fs", model, attempt + 1, self.MAX_RETRIES, delay)
+                if attempt < self.MAX_RETRIES:
+                    await asyncio.sleep(delay)
+
+            except Exception as e:
+                last_error = e
+                delay = self.BASE_RETRY_DELAY * (2 ** attempt)
+                logger.warning("gemini_error | model=%s attempt=%d/%d error=%s", model, attempt + 1, self.MAX_RETRIES, str(e))
+                if attempt < self.MAX_RETRIES:
+                    await asyncio.sleep(delay)
+
+        raise AgentError(
+            f"Gemini call failed after {self.MAX_RETRIES + 1} attempts: {last_error}",
+            agent_name=model,
+        ) from last_error
+
+    async def call_groq(
+        self,
+        model: str,
+        messages: list[dict[str, str]],
+        system_prompt: str,
+        json_mode: bool = True,
+        max_tokens: int = 2048,
+        api_key: str | None = None,
+    ) -> LLMResponse:
+        """
+        Makes one call to the Groq API (OpenAI-compatible).
+        Free tier: 30 requests/minute.
+        """
+        from backend.config import get_settings
+        cfg = get_settings()
+        key = api_key or cfg.groq_api_key
+
+        # Groq uses an OpenAI-compatible API
+        client = openai.AsyncOpenAI(
+            api_key=key,
+            base_url="https://api.groq.com/openai/v1",
+        )
+
+        full_messages = [{"role": "system", "content": system_prompt}] + messages
+        response_format = {"type": "json_object"} if json_mode else {"type": "text"}
+
+        last_error: Exception | None = None
+        for attempt in range(self.MAX_RETRIES + 1):
+            start = time.monotonic()
+            try:
+                response = await client.chat.completions.create(
+                    model=model,
+                    messages=full_messages,
+                    response_format=response_format,
+                    max_tokens=max_tokens,
+                    temperature=0.1,
+                )
+
+                latency = time.monotonic() - start
+                raw_content = response.choices[0].message.content or "{}"
+                input_tokens = response.usage.prompt_tokens if response.usage else 0
+                output_tokens = response.usage.completion_tokens if response.usage else 0
+
+                is_valid_json = True
+                try:
+                    parsed = json.loads(raw_content)
+                except json.JSONDecodeError:
+                    logger.warning("groq_json_parse_failed | model=%s attempt=%d", model, attempt)
+                    parsed = _try_extract_json(raw_content)
+                    is_valid_json = bool(parsed)
+
+                cost = _compute_cost(model, input_tokens, output_tokens)
+                logger.info(
+                    "groq_call | model=%s input_tokens=%d output_tokens=%d latency=%.2fs cost=$%.6f",
+                    model, input_tokens, output_tokens, latency, cost,
+                )
+
+                await _persist_call_log(
+                    model=model, input_tokens=input_tokens, output_tokens=output_tokens,
+                    cost_usd=cost, latency_seconds=latency, is_valid_json=is_valid_json,
+                )
+
+                return LLMResponse(
+                    content=parsed, input_tokens=input_tokens, output_tokens=output_tokens,
+                    model_used=model, latency_seconds=round(latency, 3),
+                    estimated_cost_usd=cost, is_valid_json=is_valid_json,
+                )
+
+            except openai.RateLimitError as e:
+                last_error = e
+                delay = self.BASE_RETRY_DELAY * (2 ** attempt)
+                logger.warning("groq_rate_limit | model=%s attempt=%d/%d | waiting %.1fs", model, attempt + 1, self.MAX_RETRIES, delay)
+                if attempt < self.MAX_RETRIES:
+                    await asyncio.sleep(delay)
+
+            except Exception as e:
+                last_error = e
+                delay = self.BASE_RETRY_DELAY * (2 ** attempt)
+                logger.warning("groq_error | model=%s attempt=%d/%d error=%s", model, attempt + 1, self.MAX_RETRIES, str(e))
+                if attempt < self.MAX_RETRIES:
+                    await asyncio.sleep(delay)
+
+        raise AgentError(
+            f"Groq call failed after {self.MAX_RETRIES + 1} attempts: {last_error}",
             agent_name=model,
         ) from last_error
 

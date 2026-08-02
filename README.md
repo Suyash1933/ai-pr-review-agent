@@ -246,3 +246,26 @@ prompts/            Versioned prompt files per agent
 
 Built by [Ayush Singh](https://github.com/ayush488-glitch)
 "# ai-pr-review-agent" 
+
+
+## start commands on local environments
+Terminal 1 — Backend:
+
+
+cd C:\Users\mishr\OneDrive\Desktop\ai-pr-review-agent
+python -m uvicorn backend.main:app --host 0.0.0.0 --port 8001 --reload
+Terminal 2 — Frontend:
+
+
+cd C:\Users\mishr\OneDrive\Desktop\ai-pr-review-agent\frontend
+npx next dev --port 3000
+Terminal 3 — ARQ Worker:
+
+
+cd C:\Users\mishr\OneDrive\Desktop\ai-pr-review-agent
+python -m arq backend.job_queue.arq_worker.WorkerSettings
+Terminal 4 — Ngrok:
+
+
+ngrok http 8001
+Start them in this order: ngrok first (get the URL), then backend, frontend, worker.
