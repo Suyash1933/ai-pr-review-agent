@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import useSWR from "swr";
 import Link from "next/link";
 import { ReviewStatusBadge } from "@/components/ReviewStatusBadge";
@@ -16,12 +17,29 @@ const ACTIVE_STATUSES = new Set([
 ]);
 
 export default function ReviewsPage() {
-  const { data, error, isLoading } =
+  const { data, error, isLoading, mutate } =
     useSWR<Paginated<ReviewSummary>>("/api/v1/reviews?limit=100");
+  const [deleting, setDeleting] = useState<string | null>(null);
 
   const items = data?.items ?? [];
   const activeReviews = items.filter((r) => ACTIVE_STATUSES.has(r.status));
   const hasActive = activeReviews.length > 0;
+
+  const handleDelete = async (e: React.MouseEvent, id: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!confirm("Delete this review?")) return;
+    setDeleting(id);
+    try {
+      await fetch(`/api/v1/reviews/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      await mutate();
+    } finally {
+      setDeleting(null);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -67,6 +85,7 @@ export default function ReviewsPage() {
                 <th className="text-left px-4 py-2">Verdict</th>
                 <th className="text-left px-4 py-2">Status</th>
                 <th className="text-left px-4 py-2">Created</th>
+                <th className="text-left px-4 py-2"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -106,6 +125,18 @@ export default function ReviewsPage() {
                     </td>
                     <td className="px-4 py-3 text-muted text-xs">
                       {new Date(r.created_at).toLocaleString()}
+                    </td>
+                    <td className="px-4 py-3">
+                      <button
+                        onClick={(e) => handleDelete(e, r.id)}
+                        disabled={deleting === r.id}
+                        className="text-muted hover:text-err transition text-xs px-2 py-1
+                                   border border-border rounded hover:border-err/30
+                                   disabled:opacity-50"
+                        title="Delete this review"
+                      >
+                        {deleting === r.id ? "..." : "✕"}
+                      </button>
                     </td>
                   </tr>
                 );
