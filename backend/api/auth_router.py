@@ -93,13 +93,9 @@ async def login(settings: Settings = Depends(get_settings)):
         # Redis down — accept the CSRF risk for now (dev mode)
         pass
 
-    # Build the callback URL — must be reachable from the internet for GitHub OAuth
-    if not settings.webhook_base_url:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="WEBHOOK_BASE_URL not configured in .env",
-        )
-    callback_url = f"{settings.webhook_base_url}/api/v1/auth/callback"
+    # OAuth callback goes through localhost (browser redirect, not server-to-server)
+    # Webhooks use WEBHOOK_BASE_URL (ngrok) but OAuth doesn't need it
+    callback_url = "http://localhost:8001/api/v1/auth/callback"
 
     authorize_url = get_github_authorize_url(
         client_id=settings.github_oauth_client_id,
