@@ -181,4 +181,4 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Run eval gate
-        run: python3 -m pytest tests/eval_gate.py -v -s --timeout=120
+        run: python3 -m pytest tests/test_eval_gate.py -v -s --timeout=120
