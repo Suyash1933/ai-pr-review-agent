@@ -268,4 +268,4 @@ Terminal 4 — Ngrok:
 
 
 ngrok http 8001
-Start them in this order: ngrok first (get the URL), then backend, frontend, worker..
+Start them in this order: ngrok first (get the URL), then backend, frontend, worker.
