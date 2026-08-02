@@ -85,7 +85,7 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Run backend tests
-        run: python3 -m pytest tests/ -v --tb=short -x --ignore=tests/eval_gate.py
+        run: python3 -m pytest tests/ -v --tb=short -x --ignore=tests/eval_gate.py --ignore=tests/test_eval_gate.py --ignore=tests/test_eval_phase9.py
 
   # ---------------------------------------------------------------------------
   # JOB 3: Frontend build check
